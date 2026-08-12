@@ -48,7 +48,17 @@ export function orderRoutes(repository: OrderRepository): FastifyPluginAsync {
         throw new HttpError(401, 'UNAUTHENTICATED', 'A customer session is required.');
       }
       const input = parseInput(createOrderSchema, request.body);
-      const order = await repository.create({ customerId, ...input });
+      const items = input.items.map(({ notes, ...item }) => ({
+        ...item,
+        ...(notes === undefined ? {} : { notes }),
+      }));
+      const order = await repository.create({
+        customerId,
+        restaurantId: input.restaurantId,
+        deliveryAddress: input.deliveryAddress,
+        deliveryFee: input.deliveryFee,
+        items,
+      });
       return reply.code(201).send({ data: order });
     });
   };

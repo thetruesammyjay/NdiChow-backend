@@ -1,6 +1,6 @@
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { LogController, type FastifyInstance } from 'fastify';
 import type { AppEnvironment } from './config/env.js';
 import { HttpError } from './lib/http-error.js';
 import { InMemoryOrderRepository, type OrderRepository } from './modules/orders/order.repository.js';
@@ -19,7 +19,9 @@ export async function buildApp(
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: env.NODE_ENV === 'test' ? false : { level: env.LOG_LEVEL },
-    disableRequestLogging: env.NODE_ENV === 'test',
+    logController: new LogController({
+      disableRequestLogging: env.NODE_ENV === 'test',
+    }),
   });
 
   await app.register(helmet);

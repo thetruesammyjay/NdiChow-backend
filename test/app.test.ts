@@ -48,4 +48,30 @@ describe('NdiChow API', () => {
     const listed = await app.inject({ method: 'GET', url: '/api/v1/orders', headers: { 'x-customer-id': 'customer-1' } });
     expect(listed.json().data).toHaveLength(1);
   });
+
+  it('preserves an order item note when supplied', async () => {
+    app = await buildApp(testEnv);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/orders',
+      headers: { 'x-customer-id': 'customer-2' },
+      payload: {
+        restaurantId: 'jollof-corner',
+        deliveryAddress: '8 Bourdillon Road, Lagos',
+        deliveryFee: 900,
+        items: [
+          {
+            menuItemId: 'party-jollof-chicken',
+            name: 'Party Jollof & Chicken',
+            unitPrice: 4800,
+            quantity: 1,
+            notes: 'No plantain, please',
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().data.items[0].notes).toBe('No plantain, please');
+  });
 });
