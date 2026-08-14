@@ -1,158 +1,117 @@
 # NdiChow Backend
 
-The NdiChow backend is a strict TypeScript API for restaurant discovery, menus, carts, orders, payments, delivery status, and customer notifications.
+NdiChow Backend is the TypeScript API and PostgreSQL system of record for the NdiChow food-ordering platform. It serves the Flutter app in [NdiChow](https://github.com/thetruesammyjay/NdiChow).
 
-This repository owns business rules and server-side data. The Flutter customer application lives in [`NdiChow`](https://github.com/thetruesammyjay/NdiChow).
+## Implemented foundation
 
-## Project status
+- Fastify 5 with strict TypeScript and Zod validation
+- Neon/PostgreSQL persistence through Drizzle ORM and postgres.js
+- Versioned restaurant discovery and menu endpoints
+- Email/password registration and login using salted scrypt hashes
+- Opaque bearer sessions stored as SHA-256 token hashes
+- Authenticated, ownership-checked order history and detail
+- Transactional order creation with status history
+- Server-authoritative menu names, prices, delivery fees, availability, and minimum order
+- Per-customer idempotency keys for safe checkout retries
+- Security headers, request-size limits, global/auth rate limits, request IDs, and production CORS validation
+- Liveness and database readiness endpoints
+- ESLint, Prettier, Vitest, builds, migrations, and GitHub Actions CI
 
-The API is in its foundation stage. It currently provides:
-
-- Fastify 5 application and HTTP server
-- Strict TypeScript configuration
-- Zod environment and request validation
-- Security headers and configurable CORS
-- Versioned REST endpoints
-- Consistent success and error envelopes
-- Health monitoring endpoint
-- Restaurant listing, search, detail, and menu data
-- Customer order creation, detail, and history
-- Repository interfaces with in-memory development adapters
-- Dependency injection for isolated tests
-- Integration tests using Fastify request injection
-- Graceful process shutdown
-
-The in-memory adapters make the service immediately runnable, but they are not durable. PostgreSQL persistence, production authentication, payment verification, and background jobs are the next major layers.
-
-## Technology
-
-- Node.js 22+
-- TypeScript
-- Fastify
-- Zod
-- Vitest
-- PostgreSQL planned as the system of record
-
-## Architecture
-
-NdiChow starts as a modular monolith. This keeps deployment and transactions straightforward while preserving clear module boundaries.
-
-```text
-src/
-├── config/
-│   └── env.ts                 # Validated environment configuration
-├── lib/
-│   ├── http-error.ts          # Stable application errors
-│   └── validation.ts          # Zod-to-HTTP validation boundary
-├── modules/
-│   ├── orders/
-│   │   ├── order.model.ts
-│   │   ├── order.repository.ts
-│   │   └── order.routes.ts
-│   └── restaurants/
-│       ├── restaurant.model.ts
-│       ├── restaurant.repository.ts
-│       └── restaurant.routes.ts
-├── app.ts                     # Application composition
-└── index.ts                   # Process bootstrap and shutdown
-
-test/
-└── app.test.ts                # API integration coverage
-```
-
-Each domain module should eventually contain its model, schemas, service/use cases, repository contract, infrastructure adapter, and routes. Route handlers should validate and translate HTTP concerns; business rules belong in services.
+Payments, restaurant hours/delivery zones, role-specific operations, refresh-token rotation, and background notifications remain future work.
 
 ## Requirements
 
-- Node.js 22 or newer
-- npm 10 or newer
-- PostgreSQL 16+ when the persistent adapter is introduced
+- Node.js 22.13+ or Node.js 24+
+- npm 10+
+- PostgreSQL 15+ or a Neon project
 
-## Local setup
-
-Clone and enter the repository:
-
-```bash
-git clone https://github.com/thetruesammyjay/NdiChow-backend.git
-cd NdiChow-backend
-```
-
-Install dependencies:
+Node.js 24 LTS is recommended. Install dependencies with:
 
 ```bash
 npm install
 ```
 
-Create local configuration:
+## Configuration
+
+Copy `.env.example` to `.env` and replace example values. Never commit `.env`.
+
+| Variable                 | Required   | Default        | Description                                                         |
+| ------------------------ | ---------- | -------------- | ------------------------------------------------------------------- |
+| `NODE_ENV`               | No         | `development`  | `development`, `test`, or `production`                              |
+| `HOST`                   | No         | `0.0.0.0`      | Bind address                                                        |
+| `PORT`                   | No         | `4000`         | HTTP port                                                           |
+| `LOG_LEVEL`              | No         | `info`         | Fastify log level                                                   |
+| `CORS_ORIGINS`           | Production | `*`            | Comma-separated allowed origins; wildcard is rejected in production |
+| `DATABASE_URL`           | Production | none           | Runtime PostgreSQL URL; use Neon's pooled URL                       |
+| `DATABASE_MIGRATION_URL` | No         | `DATABASE_URL` | Direct/non-pooled URL for migrations when available                 |
+| `AUTH_SESSION_DAYS`      | No         | `7`            | Session lifetime, from 1 to 90 days                                 |
+
+For Neon, use the pooled connection string as `DATABASE_URL`. The direct connection string is preferred for `DATABASE_MIGRATION_URL`, but migration commands safely fall back to `DATABASE_URL`. The literal starter hostname `direct-host` is treated as an unset placeholder.
+
+Do not expose either database URL to Flutter. Rotate a URL immediately if it is pasted into chat, logs, source control, or a client build.
+
+## Database setup
+
+The committed SQL in `drizzle/` is the schema history. Apply it and seed the development catalog:
 
 ```bash
-cp .env.example .env
+npm run db:migrate
+npm run db:seed
 ```
 
-Start the development server:
+After changing `src/database/schema.ts`:
+
+```bash
+npm run db:generate
+npm run db:migrate
+```
+
+Review generated SQL before applying it to shared or production databases. Production migration should be a controlled deployment step, not part of every server startup.
+
+## Run locally
 
 ```bash
 npm run dev
 ```
 
-The service listens on `http://localhost:4000` by default.
-
-Check it with:
+The default address is `http://localhost:4000`.
 
 ```bash
 curl http://localhost:4000/health
+curl http://localhost:4000/ready
 ```
 
-## Environment variables
+`/health` proves the process is alive. `/ready` also checks PostgreSQL when database-backed dependencies are active.
 
-| Variable | Required | Default | Description |
-| --- | --- | --- | --- |
-| `NODE_ENV` | No | `development` | Runtime environment |
-| `HOST` | No | `0.0.0.0` | HTTP bind address |
-| `PORT` | No | `4000` | HTTP port |
-| `LOG_LEVEL` | No | `info` | Fastify/Pino log level |
-| `CORS_ORIGINS` | No | `*` | Comma-separated allowed origins |
-| `DATABASE_URL` | Production | — | PostgreSQL connection string |
+## Architecture
 
-Configuration is parsed once during startup. Invalid values fail fast rather than allowing a partially configured server to run.
+```text
+src/
+|-- config/             Validated environment
+|-- database/           Schema, client, migration, and seed
+|-- lib/                HTTP errors and validation boundary
+|-- modules/
+|   |-- auth/           Passwords, sessions, auth routes/repositories
+|   |-- orders/         Ordering rules and transactional repositories
+|   `-- restaurants/    Discovery, catalog, and repositories
+|-- app.ts              Fastify composition
+`-- index.ts            Database/runtime bootstrap and shutdown
 
-Never commit `.env`. Production secrets should be injected by the hosting platform.
-
-## Commands
-
-```bash
-# Development server with reload
-npm run dev
-
-# Static type checking
-npm run typecheck
-
-# Run tests once
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Compile production JavaScript
-npm run build
-
-# Run the compiled server
-npm start
+drizzle/                Generated SQL migration history
+test/                   Fastify integration tests
 ```
+
+Tests use in-memory repository implementations. The running server selects database repositories whenever `DATABASE_URL` is configured.
 
 ## API conventions
 
-Application endpoints are versioned under `/api/v1`. Health checks intentionally remain at `/health`.
-
-Successful responses:
+Application endpoints live under `/api/v1`. Success responses use a data envelope; list endpoints can also include pagination metadata.
 
 ```json
-{
-  "data": {}
-}
+{ "data": {}, "meta": { "page": 1, "limit": 20, "total": 2 } }
 ```
 
-Error responses:
+Errors expose stable codes and safe messages:
 
 ```json
 {
@@ -164,256 +123,130 @@ Error responses:
 }
 ```
 
-Error `code` values are stable application identifiers. Messages are safe to display but clients may map codes to localized copy.
+Money is stored and calculated as integers in whole Nigerian naira. For example, `4800` means ₦4,800. Do not use floating-point values for money.
 
-Money is represented in the currency's smallest practical unit as integers. Seed values currently use whole Nigerian naira, so `4800` means `₦4,800`. Floating-point amounts must not be used for financial calculations.
+## Endpoints
 
-## Current endpoints
-
-### Health
+### Public and authentication
 
 ```http
-GET /health
+GET  /health
+GET  /ready
+GET  /api/v1/restaurants?q=jollof&page=1&limit=20
+GET  /api/v1/restaurants/:restaurantId
+POST /api/v1/auth/register
+POST /api/v1/auth/login
+GET  /api/v1/auth/me
+POST /api/v1/auth/logout
 ```
 
-Returns service name, runtime status, environment, and timestamp.
+Register payload:
 
-### List or search restaurants
+```json
+{
+  "email": "customer@example.com",
+  "name": "Ada Customer",
+  "password": "a-long-unique-password"
+}
+```
+
+Registration and login return `customer`, `token`, and `expiresAt`. Send the token to protected routes:
 
 ```http
-GET /api/v1/restaurants
-GET /api/v1/restaurants?q=jollof
+Authorization: Bearer <opaque-session-token>
 ```
 
-Returns restaurant summaries without full menus.
+Only the SHA-256 digest is stored in PostgreSQL. Treat the returned token like a password and store it in platform secure storage on mobile.
 
-### Restaurant details
+### Orders
 
 ```http
-GET /api/v1/restaurants/:restaurantId
+GET  /api/v1/orders
+GET  /api/v1/orders/:orderId
+POST /api/v1/orders
 ```
 
-Returns restaurant metadata and categorized menu items.
-
-### Customer order history
-
-```http
-GET /api/v1/orders
-X-Customer-Id: development-customer-id
-```
-
-### Customer order detail
-
-```http
-GET /api/v1/orders/:orderId
-X-Customer-Id: development-customer-id
-```
-
-### Create an order
+Create an order:
 
 ```http
 POST /api/v1/orders
+Authorization: Bearer <opaque-session-token>
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
 Content-Type: application/json
-X-Customer-Id: development-customer-id
 
 {
   "restaurantId": "jollof-corner",
   "deliveryAddress": "12 Adeola Odeku Street, Lagos",
-  "deliveryFee": 900,
   "items": [
     {
       "menuItemId": "party-jollof-chicken",
-      "name": "Party Jollof & Chicken",
-      "unitPrice": 4800,
-      "quantity": 2
+      "quantity": 2,
+      "notes": "No plantain, please"
     }
   ]
 }
 ```
 
-The temporary `X-Customer-Id` mechanism only provides a development seam. It is not production authentication. A production bearer-token implementation will replace it.
+The API ignores/rejects the idea of client-authoritative pricing: it loads menu items from PostgreSQL, verifies restaurant ownership and availability, checks the minimum order, calculates totals, snapshots price/name, creates the order and initial status event in one transaction, and returns the original order if the same customer retries the same idempotency key.
 
-## Critical ordering rules
+## Commands
 
-Before production, order creation must be moved into a service that:
-
-1. Loads the restaurant and menu items from the database.
-2. Verifies that the restaurant is open and delivers to the address.
-3. Confirms every item and selected option is available.
-4. Calculates item prices, discounts, fees, and totals on the server.
-5. Creates an immutable order-item snapshot.
-6. Starts or verifies the payment transaction.
-7. Persists the order and status event in a database transaction.
-8. Publishes notification work after the transaction commits.
-
-The current endpoint accepts names and prices only to demonstrate the HTTP and repository flow. Client-provided financial values must not be trusted in production.
-
-## Planned modules
-
-```text
-modules/
-├── auth/
-├── users/
-├── addresses/
-├── restaurants/
-├── menus/
-├── carts/
-├── orders/
-├── payments/
-├── delivery/
-├── promotions/
-├── favorites/
-├── reviews/
-└── notifications/
+```bash
+npm run dev             # Reloading development server
+npm run lint            # Typed ESLint
+npm run format          # Write Prettier formatting
+npm run format:check    # Verify formatting
+npm run typecheck       # Strict TypeScript check
+npm test                # API integration tests
+npm run build           # Compile dist/
+npm start               # Run compiled server
+npm run db:generate     # Generate migration after schema edits
+npm run db:migrate      # Apply committed migrations
+npm run db:seed         # Idempotently seed initial catalog
 ```
 
-## Persistence plan
+## Security model and limitations
 
-PostgreSQL will be the source of truth. Initial tables are expected to include:
+- Production startup requires a database URL and explicit CORS origins.
+- Password endpoints have tighter rate limits than the global API limit.
+- Password hashes use Node's scrypt with a unique random salt.
+- Session tokens are high-entropy opaque values; only hashes persist.
+- Order queries authorize against the authenticated customer ID.
+- Clients never set item prices, item names, delivery fees, totals, or statuses.
+- Database operations are parameterized by Drizzle/postgres.js.
+- Request bodies are limited to 256 KiB.
+- Logs must never include bearer tokens, passwords, full addresses, or database URLs.
 
-- users
-- customer_addresses
-- restaurants
-- restaurant_hours
-- delivery_zones
-- menu_categories
-- menu_items
-- menu_item_option_groups
-- menu_item_options
-- carts and cart_items
-- orders and order_items
-- order_status_events
-- payments and payment_events
-- promotions and promotion_redemptions
-- favorites
-- reviews
-- device_tokens
+Before production ordering, add email verification/password reset, session/device management, delivery-zone and opening-hours validation, payment intent/webhook verification, administrative roles, audit logs, data-retention workflows, observability, backups, and disaster-recovery tests.
 
-Repository interfaces keep the domain independent of the eventual database library. Database migrations must be committed and applied through deployment automation.
+## Verification and CI
 
-## Authentication and authorization
+GitHub Actions uses Node 24 and runs `npm ci`, formatting, lint, typecheck, tests, and build. Run the same checks locally before a pull request. Integration tests cover health, discovery, auth-required orders, server-side totals, notes, and idempotent retries.
 
-The planned production model is:
+## Deployment order
 
-- Short-lived bearer access tokens
-- Rotating refresh tokens or a managed identity provider
-- Customer identity attached by authentication middleware
-- Role-based access for customers, restaurant staff, couriers, support, and administrators
-- Resource ownership checks in services and queries
-- Rate limiting for authentication, promotions, checkout, and public discovery APIs
+1. Inject secrets and restrictive production CORS origins.
+2. Install exact dependencies with `npm ci`.
+3. Run verification checks.
+4. Apply reviewed migrations once.
+5. Deploy the compiled service behind HTTPS.
+6. Configure liveness with `/health` and readiness with `/ready`.
+7. Seed only environments that require the sample catalog.
 
-Never authorize access from a user ID supplied directly in the request body or query string.
-
-## Payments
-
-Payment provider selection is intentionally open. Regardless of provider:
-
-- The backend creates payment intents or checkout sessions.
-- Provider secret keys remain server-side.
-- Webhook signatures are verified against the raw request body.
-- Webhook processing is idempotent.
-- The order is paid only after server-side confirmation.
-- Payment event IDs are unique to prevent replay.
-- Refunds and failures are retained as auditable state transitions.
-
-## Order status model
-
-The initial status progression is:
-
-```text
-pending
-  → confirmed
-  → preparing
-  → ready_for_pickup
-  → out_for_delivery
-  → delivered
-```
-
-Orders may also transition to `cancelled` under explicit business rules. Status transitions should be validated by role and current state, persisted as events, and exposed to customers through polling initially and realtime delivery later.
-
-## Testing strategy
-
-- Unit tests for pricing, availability, promotions, and status transitions
-- Repository contract tests for in-memory and PostgreSQL adapters
-- API integration tests through `app.inject`
-- Payment webhook fixture tests
-- Database integration tests against an isolated PostgreSQL instance
-- End-to-end checkout tests covering the Flutter client and API
-
-Tests must never depend on production services or credentials.
-
-## Deployment
-
-A production deployment should:
-
-1. Install exact lockfile dependencies with `npm ci`.
-2. Run type checking and tests.
-3. Compile with `npm run build`.
-4. Apply database migrations as a controlled release step.
-5. Start `dist/index.js` behind HTTPS.
-6. Use `/health` for readiness monitoring.
-7. Inject secrets through the hosting platform.
-8. Centralize structured logs and error reporting.
-
-The server handles `SIGINT` and `SIGTERM` so managed platforms can drain it cleanly.
-
-## Engineering conventions
-
-- Keep TypeScript strict; do not solve errors with broad `any` types.
-- Validate every external boundary.
-- Keep HTTP translation in routes and business rules in services.
-- Depend on repository interfaces, not database clients, from use cases.
-- Use explicit, stable error codes.
-- Treat all client input as untrusted.
-- Make commands and webhook handlers idempotent.
-- Log identifiers and outcomes, not credentials or unnecessary personal data.
-- Add regression tests with every defect fix.
-
-## Security checklist
-
-- Restrictive production CORS
-- Authentication and role-based authorization
-- Request size limits and rate limiting
-- Server-calculated prices and discounts
-- Parameterized database access
-- Payment webhook signature verification
-- Idempotency keys for checkout and callbacks
-- Encrypted transport and managed secrets
-- Redacted structured logs
-- Dependency and container scanning
-- Data retention and account deletion procedures
+The server closes database connections during graceful `SIGINT` and `SIGTERM` shutdown.
 
 ## Roadmap
 
-### Foundation
-
-- [x] Strict TypeScript Fastify service
-- [x] Validation and stable error contract
-- [x] Restaurant discovery and menu endpoints
-- [x] Initial order API and integration tests
-- [ ] PostgreSQL schema, migrations, and repositories
-- [ ] OpenAPI document and generated Flutter client
-
-### Ordering MVP
-
-- [ ] Customer authentication
-- [ ] Customer profiles and addresses
-- [ ] Server-side cart and pricing engine
-- [ ] Restaurant hours, availability, and delivery zones
-- [ ] Checkout idempotency
-- [ ] Payment provider and verified webhooks
-- [ ] Validated order status transitions
-- [ ] Push notification worker
-
-### Operations and growth
-
-- [ ] Restaurant management API
-- [ ] Courier workflow and delivery assignment
-- [ ] Promotions and referrals
-- [ ] Reviews and favorites
-- [ ] Realtime order tracking
-- [ ] Admin audit tools
-- [ ] Metrics, tracing, backups, and disaster recovery
+- [x] Neon persistence, migrations, and initial catalog
+- [x] Customer bearer sessions and resource ownership
+- [x] Transactional, idempotent, server-priced orders
+- [ ] Address records, delivery zones, and restaurant hours
+- [ ] Email verification and password reset
+- [ ] Payment provider with signed, idempotent webhooks
+- [ ] Validated staff/courier order-status transitions
+- [ ] Push notification worker and realtime tracking
+- [ ] OpenAPI specification and generated Flutter client
+- [ ] Metrics, tracing, audit tooling, backups, and restore drills
 
 ## License
 

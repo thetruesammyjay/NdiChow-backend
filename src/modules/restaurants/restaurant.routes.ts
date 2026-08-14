@@ -7,8 +7,19 @@ import type { RestaurantRepository } from './restaurant.repository.js';
 export function restaurantRoutes(repository: RestaurantRepository): FastifyPluginAsync {
   return async (app) => {
     app.get('/', async (request) => {
-      const query = parseInput(z.object({ q: z.string().trim().max(100).optional() }), request.query);
-      return { data: await repository.list(query.q) };
+      const query = parseInput(
+        z.object({
+          q: z.string().trim().max(100).optional(),
+          page: z.coerce.number().int().min(1).default(1),
+          limit: z.coerce.number().int().min(1).max(50).default(20),
+        }),
+        request.query,
+      );
+      const result = await repository.list(query.q, query.page, query.limit);
+      return {
+        data: result.items,
+        meta: { page: query.page, limit: query.limit, total: result.total },
+      };
     });
 
     app.get('/:restaurantId', async (request) => {

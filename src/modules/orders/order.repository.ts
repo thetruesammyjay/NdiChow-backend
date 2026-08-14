@@ -7,7 +7,11 @@ export interface CreateOrderRecord {
   items: OrderItem[];
   deliveryAddress: string;
   deliveryFee: number;
+  idempotencyKey: string;
+  requestFingerprint: string;
 }
+
+export class IdempotencyConflictError extends Error {}
 
 export interface OrderRepository {
   create(input: CreateOrderRecord): Promise<Order>;
@@ -17,13 +21,23 @@ export interface OrderRepository {
 
 export class InMemoryOrderRepository implements OrderRepository {
   private readonly orders = new Map<string, Order>();
+  private readonly idempotencyKeys = new Map<string, { orderId: string; fingerprint: string }>();
 
   async create(input: CreateOrderRecord): Promise<Order> {
+    const existing = this.idempotencyKeys.get(`${input.customerId}:${input.idempotencyKey}`);
+    if (existing) {
+      if (existing.fingerprint !== input.requestFingerprint) throw new IdempotencyConflictError();
+      return this.orders.get(existing.orderId)!;
+    }
     const now = new Date().toISOString();
     const subtotal = input.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
     const order: Order = {
       id: randomUUID(),
-      ...input,
+      customerId: input.customerId,
+      restaurantId: input.restaurantId,
+      items: input.items,
+      deliveryAddress: input.deliveryAddress,
+      deliveryFee: input.deliveryFee,
       subtotal,
       total: subtotal + input.deliveryFee,
       status: 'pending',
@@ -31,6 +45,10 @@ export class InMemoryOrderRepository implements OrderRepository {
       updatedAt: now,
     };
     this.orders.set(order.id, order);
+    this.idempotencyKeys.set(`${input.customerId}:${input.idempotencyKey}`, {
+      orderId: order.id,
+      fingerprint: input.requestFingerprint,
+    });
     return order;
   }
 

@@ -1,7 +1,11 @@
 import type { Restaurant, RestaurantSummary } from './restaurant.model.js';
 
 export interface RestaurantRepository {
-  list(query?: string): Promise<RestaurantSummary[]>;
+  list(
+    query?: string,
+    page?: number,
+    limit?: number,
+  ): Promise<{ items: RestaurantSummary[]; total: number }>;
   findById(id: string): Promise<Restaurant | null>;
 }
 
@@ -80,7 +84,11 @@ const restaurants: Restaurant[] = [
 ];
 
 export class InMemoryRestaurantRepository implements RestaurantRepository {
-  async list(query?: string): Promise<RestaurantSummary[]> {
+  async list(
+    query?: string,
+    page = 1,
+    limit = 20,
+  ): Promise<{ items: RestaurantSummary[]; total: number }> {
     const normalized = query?.trim().toLowerCase();
     const matches = normalized
       ? restaurants.filter((restaurant) =>
@@ -90,7 +98,11 @@ export class InMemoryRestaurantRepository implements RestaurantRepository {
             .includes(normalized),
         )
       : restaurants;
-    return matches.map(({ menu: _menu, ...summary }) => summary);
+    const start = (page - 1) * limit;
+    return {
+      items: matches.slice(start, start + limit).map(({ menu: _menu, ...summary }) => summary),
+      total: matches.length,
+    };
   }
 
   async findById(id: string): Promise<Restaurant | null> {
