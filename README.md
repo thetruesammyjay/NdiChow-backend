@@ -2,6 +2,8 @@
 
 NdiChow Backend is the TypeScript API and PostgreSQL system of record for the NdiChow food-ordering platform. It serves the Flutter app in [NdiChow](https://github.com/thetruesammyjay/NdiChow).
 
+Production deployment: [ndichow-backend.onrender.com](https://ndichow-backend.onrender.com) · [Readiness check](https://ndichow-backend.onrender.com/ready)
+
 ## Implemented foundation
 
 - Fastify 5 with strict TypeScript and Zod validation
