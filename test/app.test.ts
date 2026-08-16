@@ -123,4 +123,37 @@ describe('NdiChow API', () => {
     const response = await app.inject({ method: 'GET', url: '/api/v1/orders' });
     expect(response.statusCode).toBe(401);
   });
+
+  it('logs out an authenticated customer and invalidates the session', async () => {
+    app = await buildApp(testEnv);
+    const token = await register(app, 'logout@example.com');
+
+    const loggedOut = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const sessionCheck = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(loggedOut.statusCode).toBe(204);
+    expect(sessionCheck.statusCode).toBe(401);
+  });
+
+  it('preserves Fastify client-error status codes', async () => {
+    app = await buildApp(testEnv);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: 'unexpected=value',
+    });
+
+    expect(response.statusCode).toBe(415);
+    expect(response.json().error.code).toBe('FST_ERR_CTP_INVALID_MEDIA_TYPE');
+  });
 });

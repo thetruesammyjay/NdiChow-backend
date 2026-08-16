@@ -72,6 +72,23 @@ export async function buildApp(
         error: { code: error.code, message: error.message, details: error.details },
       });
     }
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'statusCode' in error &&
+      typeof error.statusCode === 'number' &&
+      error.statusCode >= 400 &&
+      error.statusCode < 500
+    ) {
+      const code = 'code' in error && typeof error.code === 'string' ? error.code : 'BAD_REQUEST';
+      const message =
+        'message' in error && typeof error.message === 'string'
+          ? error.message
+          : 'The request could not be processed.';
+      return reply.code(error.statusCode).send({
+        error: { code, message },
+      });
+    }
     app.log.error(error);
     return reply.code(500).send({
       error: { code: 'INTERNAL_SERVER_ERROR', message: 'An unexpected error occurred.' },
