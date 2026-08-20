@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import type { AppEnvironment } from '../src/config/env.js';
 
+// Isolated test environment configuration to run the app silently on local ports
 const testEnv: AppEnvironment = {
   NODE_ENV: 'test',
   HOST: '127.0.0.1',
@@ -12,6 +13,9 @@ const testEnv: AppEnvironment = {
   AUTH_SESSION_DAYS: 7,
 };
 
+/**
+ * Helper to register a test user and extract the bearer authentication token.
+ */
 async function register(app: FastifyInstance, email: string) {
   const response = await app.inject({
     method: 'POST',
@@ -24,6 +28,8 @@ async function register(app: FastifyInstance, email: string) {
 
 describe('NdiChow API', () => {
   let app: FastifyInstance | undefined;
+  
+  // Teardown: ensure the server instance closes after every test to free resources
   afterEach(async () => app?.close());
 
   it('reports service health', async () => {
@@ -43,6 +49,8 @@ describe('NdiChow API', () => {
   it('creates and returns a customer order', async () => {
     app = await buildApp(testEnv);
     const token = await register(app, 'customer1@example.com');
+    
+    // Create an order with an idempotency key
     const created = await app.inject({
       method: 'POST',
       url: '/api/v1/orders',
@@ -56,6 +64,7 @@ describe('NdiChow API', () => {
     expect(created.statusCode).toBe(201);
     expect(created.json().data.total).toBe(10_500);
 
+    // Verify the created order appears in the user's order history
     const listed = await app.inject({
       method: 'GET',
       url: '/api/v1/orders',
@@ -67,6 +76,8 @@ describe('NdiChow API', () => {
   it('preserves an order item note when supplied', async () => {
     app = await buildApp(testEnv);
     const token = await register(app, 'customer2@example.com');
+    
+    // Ensure special instructions on menu items persist through creation
     const response = await app.inject({
       method: 'POST',
       url: '/api/v1/orders',
@@ -91,6 +102,8 @@ describe('NdiChow API', () => {
   it('uses authoritative menu prices and makes retries idempotent', async () => {
     app = await buildApp(testEnv);
     const token = await register(app, 'customer3@example.com');
+    
+    // Client attempts to spoof unit prices and delivery fees in payload
     const request = {
       method: 'POST' as const,
       url: '/api/v1/orders',
@@ -104,7 +117,71 @@ describe('NdiChow API', () => {
         ],
       },
     };
+
+    // First request creates the order; second identical request returns the cached result
     const first = await app.inject(request);
+    const second = await app.inject(request);
+
+    // Reusing the same idempotency key with a altered payload must trigger a conflict
+    const conflicting = await app.inject({
+      ...request,
+      payload: { ...request.payload, deliveryAddress: '2 Marina Road, Lagos' },
+    });
+
+    expect(first.statusCode).toBe(201);
+    expect(second.json().data.id).toBe(first.json().data.id);
+    
+    // Validate that backend discarded client-provided price and name overrides
+    expect(first.json().data.total).toBe(5700);
+    expect(first.json().data.items[0].name).toBe('Party Jollof & Chicken');
+    
+    expect(conflicting.statusCode).toBe(409);
+    expect(conflicting.json().error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  });
+
+  it('rejects unauthenticated order access', async () => {
+    app = await buildApp(testEnv);
+    const response = await app.inject({ method: 'GET', url: '/api/v1/orders' });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('logs out an authenticated customer and invalidates the session', async () => {
+    app = await buildApp(testEnv);
+    const token = await register(app, 'logout@example.com');
+
+    // Terminate session
+    const loggedOut = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    
+    // Verify that subsequent queries using the same token fail
+    const sessionCheck = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(loggedOut.statusCode).toBe(204);
+    expect(sessionCheck.statusCode).toBe(401);
+  });
+
+  it('preserves Fastify client-error status codes', async () => {
+    app = await buildApp(testEnv);
+
+    // Send unsupported content type to verify Fastify's native 415 handling
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/logout',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: 'unexpected=value',
+    });
+
+    expect(response.statusCode).toBe(415);
+    expect(response.json().error.code).toBe('FST_ERR_CTP_INVALID_MEDIA_TYPE');
+  });
+});
     const second = await app.inject(request);
     const conflicting = await app.inject({
       ...request,
